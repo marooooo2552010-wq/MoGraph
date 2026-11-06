@@ -1,0 +1,105 @@
+<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>MoGraph</title>
+<style>
+:root{--bg:#0e1320;--p:#171e30;--l:#2a3350;--t:#e9ecf5;--m:#8b94ad;--a:#ffb020}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--t);font:14px system-ui,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+button,select{background:var(--p);color:var(--t);border:1px solid var(--l);border-radius:8px;padding:8px 11px;font:inherit}
+button.on{background:var(--a);color:#111;border-color:var(--a)}
+.row{display:flex;gap:6px;padding:6px;overflow-x:auto;align-items:center}.row button{white-space:nowrap}
+#cv{width:100%;max-height:33vh;background:#000;object-fit:contain;direction:ltr}
+#tr{direction:ltr;display:flex;gap:8px;align-items:center;padding:6px 10px}
+#tl{flex:1;accent-color:var(--a)}
+#bars{direction:ltr;padding:0 10px}.bar{height:14px;margin:2px 0;background:var(--p);position:relative;border-radius:4px}
+.bar i{position:absolute;top:0;bottom:0;background:var(--l);border-radius:4px}.bar.on i{background:var(--a)}
+#pr{flex:1;overflow-y:auto;padding:6px 10px}
+.r{display:flex;gap:8px;align-items:center;margin:5px 0}.r span{min-width:62px;color:var(--m)}.r input{flex:1;accent-color:var(--a)}
+#toast{position:fixed;bottom:16px;left:12px;right:12px;background:var(--a);color:#111;padding:10px;border-radius:8px;display:none;z-index:9}
+</style></head><body>
+<div class="row">
+<button onclick="$('#fm').click()">+ ميديا</button><button onclick="txt()">+ نص</button>
+<button onclick="$('#ff').click()">FFX</button><button id="ex" onclick="exp()">تصدير</button>
+<select id="fps" onchange="FPS=+this.value"><option>24</option><option selected>30</option><option>60</option></select>
+</div>
+<input id="fm" type="file" accept="video/*,image/*" multiple hidden onchange="media(this.files)">
+<input id="ff" type="file" accept=".ffx" hidden onchange="ffx(this.files[0])">
+<svg id="SV" width="0" height="0" style="position:absolute"><defs></defs></svg>
+<canvas id="cv"></canvas>
+<div id="tr"><button id="pl" onclick="play()">▶</button><input id="tl" type="range" min="0" max="10" step="0.01" value="0" oninput="seek(+this.value)" onchange="ui()"><b id="tt">0/10</b></div>
+<div id="bars"></div><div class="row" id="ly"></div><div id="pr"></div><div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s),cv=$('#cv'),ctx=cv.getContext('2d');
+let W=1280,H=720,FPS=30,DUR=10,T=0,playing=false,exporting=false,last=0,layers=[],sel=null,id=0,ac,dest,rec,chunks=[];
+const P=[['x','X',-1280,1280],['y','Y',-720,720],['s','Scale %',1,400],['r','Rotate',-360,360],['o','Opacity',0,100]];
+const FX={blur:['Blur',0,60,10],bright:['Brightness',0,300,130],contrast:['Contrast',0,300,130],sat:['Saturation',0,400,150],hue:['Hue',0,360,40],glow:['Glow',0,80,20],gray:['B&W',0,100,100],sepia:['Sepia',0,100,100],invert:['Invert',0,100,100],sharp:['Sharpen',0,300,60],unsharp:['Unsharp Mask',0,300,150],grade:['Color Grade',0,100,60],cc1:['CC1 Look',0,100,70],grad4:['4-Color Gradient',0,100,40]};
+const NS='http://www.w3.org/2000/svg',SV=document.querySelector('#SV defs');
+function sf(e){const k='sf'+e.id;let f=document.getElementById(k);if(!f){f=document.createElementNS(NS,'filter');f.id=k;f.setAttribute('color-interpolation-filters','sRGB');SV.appendChild(f)}
+if(f._v!==e.v){f._v=e.v;const a=e.v/(e.t=='sharp'?200:100);f.innerHTML=e.t=='sharp'?`<feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="0 ${-a} 0 ${-a} ${1+4*a} ${-a} 0 ${-a} 0"/>`:`<feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b"/><feComposite in="SourceGraphic" in2="b" operator="arithmetic" k1="0" k2="${1+a}" k3="${-a}" k4="0"/>`}return `url(#${k})`}
+const TB=[[.006,.097,.202,.349,.537,.694,.778,.861,1],[.006,.079,.194,.44,.63,.713,.795,.857,1],[.002,.095,.223,.478,.602,.663,.72,.833,1]];
+function cf(e){const k='cf'+e.id;let f=document.getElementById(k);if(!f){f=document.createElementNS(NS,'filter');f.id=k;f.setAttribute('color-interpolation-filters','sRGB');SV.appendChild(f)}
+if(f._v!==e.v){f._v=e.v;const a=e.v/100,t=c=>TB[c].map((y,i)=>(i/8+(y-i/8)*a).toFixed(3)).join(' ');f.innerHTML=`<feComponentTransfer><feFuncR type="table" tableValues="${t(0)}"/><feFuncG type="table" tableValues="${t(1)}"/><feFuncB type="table" tableValues="${t(2)}"/></feComponentTransfer>`}return `url(#${k})`}
+const FS={cc1:(v,e)=>cf(e)+` saturate(${100+v*.3}%)`,blur:v=>`blur(${v}px)`,bright:v=>`brightness(${v}%)`,contrast:v=>`contrast(${v}%)`,sat:v=>`saturate(${v}%)`,hue:v=>`hue-rotate(${v}deg)`,gray:v=>`grayscale(${v}%)`,sepia:v=>`sepia(${v}%)`,invert:v=>`invert(${v}%)`,sharp:(v,e)=>sf(e),unsharp:(v,e)=>sf(e),grade:v=>`contrast(${100+v*.2}%) saturate(${100+v*.3}%)`};
+const mk=c=>{const k=document.createElement('canvas');k.width=k.height=2;const x=k.getContext('2d');c.forEach((o,i)=>{x.fillStyle=o;x.fillRect(i%2,i>>1,1,1)});return k};
+const GR={grade:mk(['#1f7a8c','#1f7a8c','#f0883e','#f0883e']),grad4:mk(['#ff3d81','#3d8bff','#ffb020','#2ee6a8'])};
+function size(){cv.width=W;cv.height=H;$('#tl').max=DUR}
+size();
+function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',4500)}
+function val(l,p){const k=l.kf[p];if(!k.length)return l.b[p];if(T<=k[0][0])return k[0][1];for(let i=1;i<k.length;i++)if(T<=k[i][0]){const a=k[i-1],b=k[i];return a[1]+(b[1]-a[1])*(T-a[0])/(b[0]-a[0])}return k[k.length-1][1]}
+function setKey(k,v){const a=sel.kf[k],i=a.findIndex(x=>Math.abs(x[0]-T)<.05);if(i>=0)a[i][1]=v;else{a.push([T,v]);a.sort((x,y)=>x[0]-y[0])}}
+function setp(k,v){sel.kf[k].length?setKey(k,v):sel.b[k]=v}
+function key(k){setKey(k,val(sel,k));ui()}
+function add(type,el,name){const l={id:++id,type,el,name,b:{x:0,y:0,s:100,r:0,o:100},kf:{x:[],y:[],s:[],r:[],o:[]},fx:[],st:0,du:DUR};layers.push(l);sel=l;ui();return l}
+function media(files){if(!ac){ac=new AudioContext();dest=ac.createMediaStreamDestination()}
+for(const f of files){const u=URL.createObjectURL(f);
+if(f.type.startsWith('video')){const v=document.createElement('video');v.src=u;v.playsInline=true;v.preload='auto';
+v.onloadedmetadata=()=>{if(!layers.length){const k=Math.min(1,1920/Math.max(v.videoWidth,v.videoHeight));W=Math.round(v.videoWidth*k/2)*2;H=Math.round(v.videoHeight*k/2)*2;DUR=Math.ceil(v.duration);size()}
+const l=add('video',v,f.name.slice(0,12));l.du=v.duration;const s=ac.createMediaElementSource(v);s.connect(ac.destination);s.connect(dest);ui()}}
+else{const i=new Image();i.onload=()=>{if(!layers.length){W=i.width;H=i.height;size()}add('image',i,f.name.slice(0,12))};i.src=u}}}
+function txt(){const s=prompt('النص:');if(!s)return;const c=document.createElement('canvas');c.width=W;c.height=300;const x=c.getContext('2d');x.font='bold 160px system-ui';x.fillStyle='#fff';x.textAlign='center';x.textBaseline='middle';x.fillText(s,W/2,150);add('text',c,s.slice(0,10))}
+function draw(l){const e=l.el,w=e.videoWidth||e.naturalWidth||e.width,h=e.videoHeight||e.naturalHeight||e.height;if(!w)return;const k=Math.min(W/w,H/h),dw=w*k,dh=h*k,oa=val(l,'o')/100;
+ctx.save();ctx.globalAlpha=oa;ctx.translate(W/2+val(l,'x'),H/2+val(l,'y'));ctx.rotate(val(l,'r')*Math.PI/180);const s=val(l,'s')/100;ctx.scale(s,s);
+const f=l.fx.filter(x=>FS[x.t]).map(x=>FS[x.t](x.v,x)).join(' ');ctx.filter=f||'none';ctx.drawImage(e,-dw/2,-dh/2,dw,dh);
+for(const x of l.fx)if(GR[x.t]){ctx.save();ctx.filter='none';ctx.globalCompositeOperation='soft-light';ctx.globalAlpha=oa*x.v/100;ctx.drawImage(GR[x.t],-dw/2,-dh/2,dw,dh);ctx.restore()}
+const g=l.fx.find(x=>x.t=='glow');if(g){ctx.globalCompositeOperation='lighter';ctx.globalAlpha=oa*.7;ctx.filter=(f+` blur(${g.v}px) brightness(1.6)`).trim();ctx.drawImage(e,-dw/2,-dh/2,dw,dh)}ctx.restore()}
+function loop(n){const dt=Math.min((n-last)/1000,.2);last=n;
+if(playing){T+=dt;if(T>=DUR){T=DUR;exporting?fin():pause()}}
+ctx.setTransform(1,0,0,1,0,0);ctx.filter='none';ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+for(const l of layers){const on=T>=l.st&&T<=l.st+l.du;
+if(l.type=='video'){if(on&&playing){if(l.el.paused)l.el.play().catch(()=>{});if(Math.abs(l.el.currentTime-(T-l.st))>.4)l.el.currentTime=T-l.st}else if(!l.el.paused)l.el.pause()}
+if(on)draw(l)}
+$('#tl').value=T;$('#tt').textContent=T.toFixed(1)+'/'+DUR;requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+function play(){if(ac)ac.resume();playing=!playing;if(playing&&T>=DUR)T=0;$('#pl').textContent=playing?'❚❚':'▶';if(!playing)ui()}
+function pause(){playing=false;$('#pl').textContent='▶';ui()}
+function seek(t){T=t;layers.forEach(l=>{if(l.type=='video')l.el.currentTime=Math.max(0,Math.min(T-l.st,l.el.duration||0))})}
+function pick(i){sel=layers.find(l=>l.id==i);ui()}
+function del(){layers=layers.filter(l=>l!=sel);sel=layers[layers.length-1]||null;ui()}
+function addfx(t){if(t&&sel){sel.fx.push({t,v:FX[t][3],id:++id});ui()}}
+function ui(){
+$('#ly').innerHTML=layers.map(l=>`<button class="${l===sel?'on':''}" onclick="pick(${l.id})">${l.name}</button>`).join('');
+$('#bars').innerHTML=layers.map(l=>`<div class="bar ${l===sel?'on':''}" onclick="pick(${l.id})"><i style="left:${l.st/DUR*100}%;width:${Math.min(l.du,DUR-l.st)/DUR*100}%"></i></div>`).join('');
+const p=$('#pr');if(!sel){p.innerHTML='<p style="color:var(--m)">ضيف فيديو أو صورة من زر + ميديا.</p>';return}
+p.innerHTML=P.map(([k,n,a,b])=>`<div class="r"><span>${n}</span><input type="range" min="${a}" max="${b}" step="any" value="${val(sel,k)}" oninput="setp('${k}',+this.value)"><button class="${sel.kf[k].length?'on':''}" onclick="key('${k}')">◆</button></div>`).join('')
++`<div class="r"><span>البداية</span><input type="range" min="0" max="${DUR}" step=".1" value="${sel.st}" oninput="sel.st=+this.value" onchange="ui()"></div><div class="r"><span>المدة</span><input type="range" min=".1" max="${DUR}" step=".1" value="${sel.du}" oninput="sel.du=+this.value" onchange="ui()"></div>`
++sel.fx.map((e,i)=>`<div class="r"><span>${FX[e.t][0]}</span><input type="range" min="${FX[e.t][1]}" max="${FX[e.t][2]}" value="${e.v}" oninput="sel.fx[${i}].v=+this.value"><button onclick="sel.fx.splice(${i},1);ui()">✕</button></div>`).join('')
++`<div class="r"><select onchange="addfx(this.value);this.value=''"><option value="">+ تأثير</option>${Object.entries(FX).map(([k,v])=>`<option value="${k}">${v[0]}</option>`).join('')}</select><button onclick="del()">حذف الطبقة</button></div>`}
+async function ffx(f){if(!f)return;if(!sel)return toast('ضيف طبقة الأول وبعدين استورد الـ FFX');
+const s=new TextDecoder('latin1').decode(await f.arrayBuffer()),names=[];let m,re=/tdmn[\s\S]{4}([ -~]{3,40})/g;while(m=re.exec(s))names.push(m[1]);const si=names.findIndex(n=>/sentinel/i.test(n));if(si>=0)names.length=si;
+const M=[[/Effect Parade|sentinel|Group End/i,null],[/Look/i,'cc1',70,1],[/Unsharp/i,'unsharp',150,1],[/Sharp/i,'sharp',60,2],[/Curves|Levels|Contrast/i,'contrast',120,1],[/Gradient/i,'grad4',40,1],[/Glo/i,'glow',25,1],[/blur/i,'blur',10,1],[/Brightness/i,'bright',120,1],[/Hue.?Sat/i,'sat',130,1],[/Black.?White/i,'gray',100,1],[/Tint|Sepia/i,'sepia',100,1],[/Invert/i,'invert',100,1]];
+const cnt={};let ok=0,no=[];
+names.forEach(n=>{const x=M.find(r=>r[0].test(n));if(!x)return no.push(n);if(!x[1])return;cnt[x[1]]=(cnt[x[1]]||0)+1;if(cnt[x[1]]<=x[3]){sel.fx.push({t:x[1],v:x[2],id:++id});ok++}});
+ui();toast(`اتطبق ${ok} تأثير من ${names.length}.`+(no.length?` اتجاهل: ${[...new Set(no)].join('، ')}`:''))}
+async function exp(){if(!layers.length)return toast('مفيش حاجة تتصدّر');if(playing)pause();if(ac)ac.resume();
+const mime=['video/mp4','video/webm;codecs=vp9','video/webm'].find(m=>MediaRecorder.isTypeSupported(m));
+const st=cv.captureStream(FPS);if(dest)dest.stream.getAudioTracks().forEach(a=>st.addTrack(a));
+rec=new MediaRecorder(st,{mimeType:mime,videoBitsPerSecond:12e6});chunks=[];rec.ondataavailable=e=>chunks.push(e.data);
+rec.onstop=()=>save(new Blob(chunks,{type:mime}),mime.includes('mp4')?'mp4':'webm');
+seek(0);$('#ex').textContent='جاري التصدير...';await new Promise(r=>setTimeout(r,400));
+rec.start();exporting=true;playing=true}
+function fin(){playing=false;exporting=false;rec.stop();$('#ex').textContent='تصدير';$('#pl').textContent='▶'}
+async function save(b,ext){const C=window.Capacitor,name='MoGraph_'+Date.now()+'.'+ext;
+try{if(C&&C.Plugins.Filesystem){const d=await new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result.split(',')[1]);f.readAsDataURL(b)});
+const o=await C.Plugins.Filesystem.writeFile({path:name,data:d,directory:'CACHE'});await C.Plugins.Share.share({title:name,files:[o.uri]});return}}catch(e){toast('خطأ في الحفظ: '+e.message)}
+const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;a.click()}
+</script></body></html>
